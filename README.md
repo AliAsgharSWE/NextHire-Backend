@@ -87,4 +87,4 @@
 
 ### 9. App Live!
 
-* App is now live on your custom domain.
+* App is now live on your custom domain
