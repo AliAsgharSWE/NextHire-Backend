@@ -6,10 +6,10 @@ import {
 } from "../services/user.service.js";
 import User from "../models/user.model.js";
 import { refreshCookieOptions } from "../utils/cookieOptions.js";
+import jwt from "jsonwebtoken";
 
 export const registerUser = async (req, res) => {
   const { fullname, email, password, phoneNumber, role } = req.body;
-  console.log("Registering user:", { fullname, email, phoneNumber, role });
 
   if (!fullname || !email || !password || !phoneNumber || !role) {
     return res.status(400).json({
@@ -20,7 +20,6 @@ export const registerUser = async (req, res) => {
   }
 
   const existingUser = await findUserByEmail(email);
-  console.log("Existing user found:", existingUser ? true : false);
   if (existingUser) {
     return res
       .status(400)
@@ -37,34 +36,26 @@ export const registerUser = async (req, res) => {
       role,
     });
 
-    console.log("User created successfully:", user._id);
 
     // Generate tokens
     const payload = { id: user._id, role: user.role };
     const accessToken = generateAccessToken(payload);
     const refreshToken = generateRefreshToken(payload);
-    console.log("Access token generated:", accessToken);
-    console.log("Refresh token generated:", refreshToken);
     // Save refresh token in DB
     user.refreshTokens.push(refreshToken);
     await user.save();
-    console.log("Refresh token saved to user:", user.refreshTokens);
-
-    // Convert to object AFTER saving
-    const userWithoutPassword = user.toObject();
-    delete userWithoutPassword.password;
-    console.log("User object without password:", userWithoutPassword);
 
     // Set refresh token in secure cookie
     res.cookie("refreshToken", refreshToken, refreshCookieOptions);
+    const { password: _, refreshTokens, ...userWithoutSensitive } = user._doc;
+
 
     return res.status(201).json({
       message: "User registered successfully",
-      user: userWithoutPassword,
+      user: userWithoutSensitive,
       accessToken,
     });
   } catch (error) {
-    console.error("Error registering user:", error);
     return res.status(500).json({ message: "Error registering user", error });
   }
 };
@@ -85,25 +76,31 @@ export const loginUser = async (req, res) => {
 
     const payload = { id: user._id, role: user.role };
 
+    // Generate tokens using correct env variables
     const accessToken = generateAccessToken(payload);
     const refreshToken = generateRefreshToken(payload);
+
+    // Save refresh token to user
     user.refreshTokens.push(refreshToken);
     await user.save();
 
-    const { password: _, ...userWithoutPassword } = user._doc;
+    const { password: _, refreshTokens, ...userWithoutSensitive } = user._doc;
 
-    // Set refresh token cookie
+
+    // Set secure refresh token cookie
     res.cookie("refreshToken", refreshToken, refreshCookieOptions);
 
     res.status(200).json({
       message: "Login successful",
-      user: userWithoutPassword,
+      user: userWithoutSensitive,
       accessToken,
     });
   } catch (error) {
+    console.error("Error logging in:", error);
     res.status(500).json({ message: "Error logging in", error });
   }
 };
+
 
 export const logoutUser = async (req, res) => {
   try {
@@ -164,7 +161,6 @@ export const refreshAccessToken = async (req, res) => {
         }
 
         // 🔹 CASE 2: Token reuse detected (stolen token was used)
-        // console.warn("⚠️ Refresh token reuse detected for user:", decoded.id);
 
         // Revoke ALL refresh tokens for that user
         user.refreshTokens = [];
@@ -205,11 +201,12 @@ export const updateUserProfile = async (req, res) => {
     user.skills = skills || user.skills;
 
     await user.save();
-    const { password: _, ...userWithoutPassword } = user._doc;
+    const { password: _, refreshTokens, ...userWithoutSensitive } = user._doc;
+
 
     res
       .status(200)
-      .json({ message: "Profile updated", user: userWithoutPassword });
+      .json({ message: "Profile updated", user: userWithoutSensitive });
   } catch (error) {
     res.status(500).json({ message: "Error updating profile", error });
   }
