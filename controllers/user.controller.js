@@ -1,14 +1,15 @@
-import { generateToken } from "../utils/token.js";
-import { cookieOptions } from "../utils/cookieOptions.js";
+import { generateAccessToken, generateRefreshToken } from "../utils/token.js";
 import {
   createUser,
   findUserByEmail,
   validatePassword,
 } from "../services/user.service.js";
 import User from "../models/user.model.js";
+import { refreshCookieOptions } from "../utils/cookieOptions.js";
 
 export const registerUser = async (req, res) => {
   const { fullname, email, password, phoneNumber, role } = req.body;
+  console.log("Registering user:", { fullname, email, phoneNumber, role });
 
   if (!fullname || !email || !password || !phoneNumber || !role) {
     return res.status(400).json({
@@ -19,6 +20,7 @@ export const registerUser = async (req, res) => {
   }
 
   const existingUser = await findUserByEmail(email);
+  console.log("Existing user found:", existingUser ? true : false);
   if (existingUser) {
     return res
       .status(400)
@@ -26,6 +28,7 @@ export const registerUser = async (req, res) => {
   }
 
   try {
+    // createUser must hash password inside
     const user = await createUser({
       fullname,
       email,
@@ -33,21 +36,36 @@ export const registerUser = async (req, res) => {
       phoneNumber,
       role,
     });
+
+    console.log("User created successfully:", user._id);
+
+    // Generate tokens
+    const payload = { id: user._id, role: user.role };
+    const accessToken = generateAccessToken(payload);
+    const refreshToken = generateRefreshToken(payload);
+    console.log("Access token generated:", accessToken);
+    console.log("Refresh token generated:", refreshToken);
+    // Save refresh token in DB
+    user.refreshTokens.push(refreshToken);
+    await user.save();
+    console.log("Refresh token saved to user:", user.refreshTokens);
+
+    // Convert to object AFTER saving
     const userWithoutPassword = user.toObject();
     delete userWithoutPassword.password;
+    console.log("User object without password:", userWithoutPassword);
 
-    const token = generateToken({ id: user._id, role: user.role });
+    // Set refresh token in secure cookie
+    res.cookie("refreshToken", refreshToken, refreshCookieOptions);
 
-    res
-      .status(201)
-      .cookie("token", token, { ...cookieOptions, maxAge: 3600000 })
-      .json({
-        message: "User registered successfully",
-        user: userWithoutPassword,
-        token,
-      });
+    return res.status(201).json({
+      message: "User registered successfully",
+      user: userWithoutPassword,
+      accessToken,
+    });
   } catch (error) {
-    res.status(500).json({ message: "Error registering user", error });
+    console.error("Error registering user:", error);
+    return res.status(500).json({ message: "Error registering user", error });
   }
 };
 
@@ -65,24 +83,102 @@ export const loginUser = async (req, res) => {
     const isMatch = await validatePassword(password, user.password);
     if (!isMatch) return res.status(400).json({ message: "Invalid password" });
 
-    const token = generateToken({ id: user._id, role: user.role });
+    const payload = { id: user._id, role: user.role };
+
+    const accessToken = generateAccessToken(payload);
+    const refreshToken = generateRefreshToken(payload);
+    user.refreshTokens.push(refreshToken);
+    await user.save();
 
     const { password: _, ...userWithoutPassword } = user._doc;
 
-    res
-      .status(200)
-      .cookie("token", token, { ...cookieOptions, maxAge: 3600000 })
-      .json({ message: "Login successful", user: userWithoutPassword, token });
+    // Set refresh token cookie
+    res.cookie("refreshToken", refreshToken, refreshCookieOptions);
+
+    res.status(200).json({
+      message: "Login successful",
+      user: userWithoutPassword,
+      accessToken,
+    });
   } catch (error) {
     res.status(500).json({ message: "Error logging in", error });
   }
 };
 
-export const logoutUser = (req, res) => {
-  res
-    .clearCookie("token", cookieOptions)
-    .status(200)
-    .json({ message: "Logout successful" });
+export const logoutUser = async (req, res) => {
+  try {
+    const token = req.signedCookies?.refreshToken;
+    if (token) {
+      const decoded = jwt.verify(token, process.env.REFRESH_TOKEN_SECRET);
+      const user = await User.findById(decoded.id);
+
+      if (user) {
+        user.refreshTokens = user.refreshTokens.filter((t) => t !== token);
+        await user.save();
+      }
+    }
+
+    res.clearCookie("refreshToken", refreshCookieOptions);
+    return res.status(200).json({ message: "Logout successful" });
+  } catch (error) {
+    return res.status(500).json({ message: "Error logging out", error });
+  }
+};
+
+export const refreshAccessToken = async (req, res) => {
+  try {
+    const oldToken = req.signedCookies?.refreshToken;
+    if (!oldToken) {
+      return res
+        .status(401)
+        .json({ message: "Unauthorized: No refresh token" });
+    }
+
+    jwt.verify(
+      oldToken,
+      process.env.REFRESH_TOKEN_SECRET,
+      async (err, decoded) => {
+        if (err)
+          return res
+            .status(403)
+            .json({ message: "Forbidden: Invalid refresh token" });
+
+        const user = await User.findById(decoded.id);
+        if (!user) return res.status(404).json({ message: "User not found" });
+
+        // 🔹 CASE 1: Token exists → rotate normally
+        if (user.refreshTokens.includes(oldToken)) {
+          // Remove old token
+          user.refreshTokens = user.refreshTokens.filter((t) => t !== oldToken);
+
+          // Generate new tokens
+          const payload = { id: user._id, role: user.role };
+          const accessToken = generateAccessToken(payload);
+          const newRefreshToken = generateRefreshToken(payload);
+
+          user.refreshTokens.push(newRefreshToken);
+          await user.save();
+
+          res.cookie("refreshToken", newRefreshToken, refreshCookieOptions);
+          return res.status(200).json({ accessToken });
+        }
+
+        // 🔹 CASE 2: Token reuse detected (stolen token was used)
+        // console.warn("⚠️ Refresh token reuse detected for user:", decoded.id);
+
+        // Revoke ALL refresh tokens for that user
+        user.refreshTokens = [];
+        await user.save();
+
+        res.clearCookie("refreshToken", refreshCookieOptions);
+        return res.status(403).json({
+          message: "Forbidden: Token reuse detected, logged out everywhere",
+        });
+      }
+    );
+  } catch (error) {
+    return res.status(500).json({ message: "Error refreshing token", error });
+  }
 };
 
 export const getUserProfile = async (req, res) => {

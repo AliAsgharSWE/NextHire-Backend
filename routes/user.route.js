@@ -6,6 +6,7 @@ import {
   updateUserProfile,
   deleteUser,
   logoutUser,
+  refreshAccessToken,
 } from "../controllers/user.controller.js";
 import isAuthenticated from "../middlewares/isAuthenticated.js";
 
@@ -17,5 +18,6 @@ router.get("/profile", isAuthenticated, getUserProfile);
 router.put("/profile/update", isAuthenticated, updateUserProfile);
 router.delete("/profile/delete", isAuthenticated, deleteUser);
 router.post("/logout", isAuthenticated, logoutUser);
+router.post("/refresh-token", refreshAccessToken);
 
 export default router;

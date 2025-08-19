@@ -1,4 +1,4 @@
-import { verifyToken } from "../utils/token.js";
+import { verifyAccessToken } from "../utils/token.js";
 
 const isAuthenticated = (req, res, next) => {
   try {
@@ -12,7 +12,7 @@ const isAuthenticated = (req, res, next) => {
         .json({ message: "Unauthorized: No token provided" });
     }
 
-    const decoded = verifyToken(token);
+    const decoded = verifyAccessToken(token);
 
     if (!decoded) {
       return res
