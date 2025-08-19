@@ -1,13 +1,12 @@
-name: Node.js CI & Deploy
+name: Node.js CI
 
 on:
   push:
     branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
 
 jobs:
-  build-and-deploy:
+  build:
+
     runs-on: self-hosted
 
     strategy:
@@ -15,50 +14,27 @@ jobs:
         node-version: [20.x]
 
     steps:
-      # Step 1: Checkout the repo
-      - uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
-      # Step 2: Setup Node.js
-      - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ matrix.node-version }}
-          cache: 'npm'
+    - name: Use Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
 
-      # Step 3: Install dependencies
-      - run: npm ci
+    - name: Set up environment variables
+      run: |
+        echo "REFRESH_TOKEN_SECRET=${{ secrets.REFRESH_TOKEN_SECRET }}" >> .env
+        echo "ACCESS_TOKEN_SECRET=${{ secrets.ACCESS_TOKEN_SECRET }}" >> .env
+        echo "COOKIE_SECRET=${{ secrets.COOKIE_SECRET }}" >> .env
+        echo "NODE_ENV=${{ secrets.NODE_ENV }}" >> .env
+        echo "MongoDB_URI=${{ secrets.MongoDB_URI }}" >> .env
+        echo "PORT=${{ secrets.PORT }}" >> .env
+        echo "MongoDB_Username=${{ secrets.MongoDB_Username }}" >> .env
+        echo "MongoDB_Password=${{ secrets.MongoDB_Password }}" >> .env
 
-      # Step 4: Build the app (if applicable)
-      - run: npm run build --if-present
+    - run: npm ci
+    - run: npm run build --if-present
 
-      # Step 5: Export GitHub secrets as environment variables (case-sensitive)
-      - name: Set environment variables
-        run: |
-          echo "REFRESH_TOKEN_SECRET=${{ secrets.REFRESH_TOKEN_SECRET }}" >> $GITHUB_ENV
-          echo "ACCESS_TOKEN_SECRET=${{ secrets.ACCESS_TOKEN_SECRET }}" >> $GITHUB_ENV
-          echo "COOKIE_SECRET=${{ secrets.COOKIE_SECRET }}" >> $GITHUB_ENV
-          echo "NODE_ENV=${{ secrets.NODE_ENV }}" >> $GITHUB_ENV
-          echo "MongoDB_URI=${{ secrets.MongoDB_URI }}" >> $GITHUB_ENV
-          echo "PORT=${{ secrets.PORT }}" >> $GITHUB_ENV
-          echo "MongoDB_Username=${{ secrets.MongoDB_Username }}" >> $GITHUB_ENV
-          echo "MongoDB_Password=${{ secrets.MongoDB_Password }}" >> $GITHUB_ENV
-
-      # Optional: verify environment variables are set
-      - name: Verify env vars
-        run: |
-          echo "PORT is $PORT"
-          echo "MongoDB_URI is set: ${MongoDB_URI:+true}"
-
-      # Step 6: Start/restart app with PM2
-      - name: Start app with PM2
-        run: |
-          pm2 restart back-end || pm2 start app.js --name back-end
-        env:
-          REFRESH_TOKEN_SECRET: ${{ secrets.REFRESH_TOKEN_SECRET }}
-          ACCESS_TOKEN_SECRET: ${{ secrets.ACCESS_TOKEN_SECRET }}
-          COOKIE_SECRET: ${{ secrets.COOKIE_SECRET }}
-          NODE_ENV: ${{ secrets.NODE_ENV }}
-          MongoDB_URI: ${{ secrets.MongoDB_URI }}
-          PORT: ${{ secrets.PORT }}
-          MongoDB_Username: ${{ secrets.MongoDB_Username }}
-          MongoDB_Password: ${{ secrets.MongoDB_Password }}
+    - name: Start or restart app with PM2
+      run: pm2 restart back-end -i max || pm2 start app.js --name back-end -i max
