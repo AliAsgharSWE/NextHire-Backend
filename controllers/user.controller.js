@@ -1,4 +1,4 @@
-import { generateAccessToken, generateRefreshToken } from "../utils/token.js";
+import { generateAccessToken, generateRefreshToken, verifyRefreshToken } from "../utils/token.js";
 import {
   createUser,
   findUserByEmail,
@@ -106,7 +106,7 @@ export const logoutUser = async (req, res) => {
   try {
     const token = req.signedCookies?.refreshToken;
     if (token) {
-      const decoded = jwt.verify(token, process.env.REFRESH_TOKEN_SECRET);
+      const decoded = verifyRefreshToken(token);
       const user = await User.findById(decoded.id);
 
       if (user) {
