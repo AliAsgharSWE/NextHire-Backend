@@ -27,7 +27,7 @@ app.use("/api/v1/user", userRoutes);
 
 app.get("/", (req, res) => {
   res.status(200).json({
-    message: "Welcome to the NextHire API for Developers",
+    message: "Welcome to the NextHire GetHire",
     success: true,
   });
 });

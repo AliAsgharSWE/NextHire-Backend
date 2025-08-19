@@ -1,18 +1,27 @@
-import jwt from "jsonwebtoken";
+import { verifyToken } from "../utils/token.js";
 
 const isAuthenticated = (req, res, next) => {
   try {
-    const token = req.cookies.token || req.headers.authorization?.split(" ")[1];
+    // Prefer signed cookie (browser) but fallback to Authorization header (API/mobile)
+    const token =
+      req.signedCookies?.token || req.headers.authorization?.split(" ")[1];
+
     if (!token) {
-      return res.status(401).json({ message: "Unauthorized" });
+      return res
+        .status(401)
+        .json({ message: "Unauthorized: No token provided" });
     }
-    jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-      if (err) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
-      req.user = user;
-      next();
-    });
+
+    const decoded = verifyToken(token);
+
+    if (!decoded) {
+      return res
+        .status(403)
+        .json({ message: "Forbidden: Invalid or expired token" });
+    }
+
+    req.user = decoded; // attach { id, role } from payload
+    next();
   } catch (error) {
     return res.status(500).json({ message: "Internal Server Error" });
   }
