@@ -1,12 +1,7 @@
-# This workflow will do a clean installation of node dependencies, cache/restore them, build the source code and run tests across different versions of node
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-nodejs
-
-name: Node.js CI
+name: NextHire-Deployement-CI-CD
 
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
     branches: [ "main" ]
 
 jobs:
@@ -16,15 +11,25 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [20.x]
-        # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
+        node-version: [22.x]
 
     steps:
     - uses: actions/checkout@v4
+
     - name: Use Node.js ${{ matrix.node-version }}
       uses: actions/setup-node@v4
       with:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
+        cache-dependency-path: |
+          package-lock.json
+
+    - name: Set up environment variables
+      run: |
+        echo "${{ secrets.PROD_BACKEND_ENV }}" >> .env
+
     - run: npm ci
     - run: npm run build --if-present
+
+    - name: Start or restart app with PM2
+      run: /home/ubuntu/.nvm/versions/node/v22.18.0/bin/pm2 restart back-end -i max || /home/ubuntu/.nvm/versions/node/v22.18.0/bin/pm2 start app.js --name back-end -i max
